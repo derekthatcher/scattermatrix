@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Stats Class Matrix Generator</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background: #f4f7f6; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        #controls { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+        #plot { width: 100%; height: 80vh; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Scatter Plot Matrix Generator</h2>
+    <div id="controls">
+        <p>Upload a CSV file (ensure the first row has headers):</p>
+        <input type="file" id="csvFile" accept=".csv" />
+    </div>
+    <div id="plot"></div>
+</div>
+
+<script>
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        
+        Papa.parse(file, {
+            header: true,
+            dynamicTyping: true,
+            complete: function(results) {
+                createMatrix(results.data, results.meta.fields);
+            }
+        });
+    });
+
+    function createMatrix(rows, headers) {
+        // Prepare dimensions for Plotly
+        const dimensions = headers.map(header => {
+            return {
+                label: header,
+                values: rows.map(row => row[header])
+            };
+        });
+
+        const data = [{
+            type: 'splom',
+            dimensions: dimensions,
+            marker: {
+                color: 'rgba(31, 119, 180, 0.5)',
+                size: 5,
+                line: { color: 'white', width: 0.5 }
+            }
+        }];
+
+        const layout = {
+            title: 'Multivariate Relationship Matrix',
+            dragmode: 'select',
+            hovermode: 'closest',
+            // This setting makes the diagonal show histograms!
+            showupperhalf: false, // Optional: hides redundant upper triangle
+        };
+
+        Plotly.newPlot('plot', data, layout);
+    }
+</script>
+
+</body>
+</html>
