@@ -100,84 +100,130 @@
     }
 
     function createChartCard(xAttr, yAttr) {
-        const safeId = cleanId(xAttr + yAttr);
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-            <div class="chart-header">
-                <h3>${xAttr} <span style="color:#888">vs</span> ${yAttr}</h3>
-                <div>
-                    <button id="trend-${safeId}">➕ Add Trendline</button>
-                    <button id="swap-${safeId}">⇄ Swap Axes</button>
-                </div>
+    const safeId = cleanId(xAttr + yAttr);
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+        <div class="chart-header">
+            <h3>${xAttr} <span style="color:#888">vs</span> ${yAttr}</h3>
+            <div>
+                <select id="model-${safeId}" style="padding: 8px; border-radius: 5px;">
+                    <option value="none">No Trendline</option>
+                    <option value="linear">Linear Fit</option>
+                    <option value="exponential">Exponential Fit</option>
+                    <option value="logarithmic">Logarithmic Fit</option>
+                </select>
+                <button id="swap-${safeId}">⇄ Swap Axes</button>
             </div>
-            <div id="${safeId}" class="chart-area"></div>
-        `;
-        document.getElementById('feed').appendChild(card);
-        
-        // Initial Draw
-        drawPlot(safeId, xAttr, yAttr);
+        </div>
+        <div id="${safeId}" class="chart-area"></div>
+    `;
+    document.getElementById('feed').appendChild(card);
+    
+    drawPlot(safeId, xAttr, yAttr);
 
-        // Add Event Listeners (Cleaner than inline onclick)
-        document.getElementById(`trend-${safeId}`).onclick = () => drawPlot(safeId, xAttr, yAttr, true);
-        document.getElementById(`swap-${safeId}`).onclick = () => swapAxes(safeId, xAttr, yAttr);
-    }
+    // Event Listeners
+    document.getElementById(`model-${safeId}`).onchange = (e) => {
+        drawPlot(safeId, xAttr, yAttr, e.target.value);
+    };
+    document.getElementById(`swap-${safeId}`).onclick = () => swapAxes(safeId, xAttr, yAttr);
+}
 
-    function drawPlot(id, xAttr, yAttr, showTrend = false) {
-        const xData = globalData.map(row => row[xAttr]);
-        const yData = globalData.map(row => row[yAttr]);
+function drawPlot(id, xAttr, yAttr, modelType = "none") {
+    const xData = globalData.map(row => row[xAttr]);
+    const yData = globalData.map(row => row[yAttr]);
 
-        const traces = [{
-            x: xData,
-            y: yData,
-            mode: 'markers',
-            name: 'Data',
-            marker: { size: 9, color: '#007bff', opacity: 0.5 }
-        }];
+    const traces = [{
+        x: xData, y: yData,
+        mode: 'markers', name: 'Data',
+        marker: { size: 9, color: '#007bff', opacity: 0.5 }
+    }];
 
-        if (showTrend) {
-            const reg = calcLinearRegression(xData, yData);
+    if (modelType !== "none") {
+        const reg = calculateRegression(xData, yData, modelType);
+        if (reg) {
             traces.push({
-                x: reg.x,
-                y: reg.y,
+                x: reg.x, y: reg.y,
                 mode: 'lines',
-                name: `Fit (R²: ${reg.r2})`,
-                line: { color: 'red', width: 2 }
+                name: `${modelType.charAt(0).toUpperCase() + modelType.slice(1)} (R²: ${reg.r2})`,
+                line: { color: '#ff4757', width: 3 }
             });
         }
-
-        Plotly.newPlot(id, traces, { 
-            xaxis: { title: xAttr }, 
-            yaxis: { title: yAttr },
-            margin: { t: 10 } 
-        });
     }
 
-    function calcLinearRegression(x, y) {
-        const n = x.length;
-        let sX = 0, sY = 0, sXY = 0, sX2 = 0, sY2 = 0;
-        for (let i = 0; i < n; i++) {
-            sX += x[i]; sY += y[i]; sXY += x[i]*y[i]; sX2 += x[i]*x[i]; sY2 += y[i]*y[i];
-        }
-        const slope = (n * sXY - sX * sY) / (n * sX2 - sX * sX);
-        const intercept = (sY - slope * sX) / n;
-        
-        // Real R² calculation
-        const xM = sX/n, yM = sY/n;
-        let num = 0, dX = 0, dY = 0;
-        for (let i=0; i<n; i++) {
-            num += (x[i]-xM)*(y[i]-yM);
-            dX += Math.pow(x[i]-xM, 2);
-            dY += Math.pow(y[i]-yM, 2);
-        }
-        const r2 = Math.pow(num, 2) / (dX * dY);
+    Plotly.newPlot(id, traces, { 
+        xaxis: { title: xAttr }, 
+        yaxis: { title: yAttr },
+        margin: { t: 10 },
+        showlegend: true
+    });
+}
 
+function calculateRegression(x, y, type) {
+    const n = x.length;
+    let regX = [], regY = [], r2 = 0;
+
+    // Filter out non-positive values for Log/Exp to avoid NaN errors in stats
+    const validData = x.map((val, i) => ({x: val, y: y[i]}))
+                       .filter(d => (type === 'linear' || (d.x > 0 && d.y > 0)));
+    
+    const vx = validData.map(d => d.x);
+    const vy = validData.map(d => d.y);
+
+    if (type === 'linear') {
+        return calcLinear(vx, vy);
+    } else if (type === 'exponential') {
+        // Exponential: y = ae^(bx) -> ln(y) = ln(a) + bx
+        const logY = vy.map(val => Math.log(val));
+        const lin = calcLinear(vx, logY);
+        const a = Math.exp(lin.intercept);
+        const b = lin.slope;
+        
+        const xSpan = Array.from({length: 50}, (_, i) => Math.min(...vx) + (i * (Math.max(...vx) - Math.min(...vx)) / 49));
         return {
-            x: [Math.min(...x), Math.max(...x)],
-            y: [Math.min(...x)*slope+intercept, Math.max(...x)*slope+intercept],
-            r2: r2.toFixed(3)
+            x: xSpan,
+            y: xSpan.map(val => a * Math.exp(b * val)),
+            r2: lin.r2 // Approximation via linearized data
+        };
+    } else if (type === 'logarithmic') {
+        // Logarithmic: y = a + b*ln(x)
+        const logX = vx.map(val => Math.log(val));
+        const lin = calcLinear(logX, vy);
+        
+        const xSpan = Array.from({length: 50}, (_, i) => Math.min(...vx) + (i * (Math.max(...vx) - Math.min(...vx)) / 49));
+        return {
+            x: xSpan,
+            y: xSpan.map(val => lin.intercept + lin.slope * Math.log(val)),
+            r2: lin.r2
         };
     }
+}
+
+// Internal helper for the heavy lifting
+function calcLinear(x, y) {
+    const n = x.length;
+    let sX=0, sY=0, sXY=0, sX2=0, sY2=0;
+    for (let i=0; i<n; i++) {
+        sX+=x[i]; sY+=y[i]; sXY+=x[i]*y[i]; sX2+=x[i]*x[i]; sY2+=y[i]*y[i];
+    }
+    const slope = (n*sXY - sX*sY) / (n*sX2 - sX*sX);
+    const intercept = (sY - slope*sX) / n;
+    
+    // R2 calculation
+    const xM = sX/n, yM = sY/n;
+    let num=0, dX=0, dY=0;
+    for (let i=0; i<n; i++) {
+        num += (x[i]-xM)*(y[i]-yM);
+        dX += (x[i]-xM)**2;
+        dY += (y[i]-yM)**2;
+    }
+    return { 
+        slope, intercept, 
+        r2: (num**2 / (dX * dY)).toFixed(3),
+        x: [Math.min(...x), Math.max(...x)],
+        y: [Math.min(...x)*slope+intercept, Math.max(...x)*slope+intercept]
+    };
+}
 
     function swapAxes(id, x, y) {
         // Find the card container to update its specific buttons/title
